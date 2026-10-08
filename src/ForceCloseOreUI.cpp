@@ -15,234 +15,9 @@
 #include <system_error>
 #include <unordered_map>
 #include <vector>
-
-namespace fs = std::filesystem;
-#if _WIN32
-
-#include <string>
-#include <vector>
 #include <windows.h>
 
-#endif
-
-#if __arm__
-#include <unistd.h>
-extern "C" int __wrap_getpagesize() { return sysconf(_SC_PAGESIZE); }
-
-#endif
-
-#if __arm__ || __aarch64__
-#include "jni.h"
-#include <android/log.h>
-
-JNIEnv *env = nullptr;
-JavaVM *javaVm = nullptr;
-
-#define LOGI(...)                                                              \
-  __android_log_print(ANDROID_LOG_INFO, "LeviLogger", __VA_ARGS__)
-#define LOGE(...)                                                              \
-  __android_log_print(ANDROID_LOG_ERROR, "LeviLogger", __VA_ARGS__)
-
-namespace {
-
-bool clearJavaException(JNIEnv *env) {
-  if (!env || !env->ExceptionCheck())
-    return false;
-  env->ExceptionClear();
-  return true;
-}
-
-std::string getJStringUtf(JNIEnv *env, jstring value) {
-  if (!env || !value)
-    return {};
-
-  const char *cstr = env->GetStringUTFChars(value, nullptr);
-  if (!cstr) {
-    clearJavaException(env);
-    return {};
-  }
-
-  std::string result(cstr);
-  env->ReleaseStringUTFChars(value, cstr);
-  return result;
-}
-
-JNIEnv *getCurrentJNIEnv() {
-  if (javaVm) {
-    JNIEnv *current_env = nullptr;
-    jint status = javaVm->GetEnv(reinterpret_cast<void **>(&current_env),
-                                 JNI_VERSION_1_4);
-    if (status == JNI_OK)
-      return current_env;
-
-    if (status == JNI_EDETACHED &&
-        javaVm->AttachCurrentThread(&current_env, nullptr) == JNI_OK)
-      return current_env;
-  }
-
-  return env;
-}
-
-} // namespace
-
-jobject getGlobalContext(JNIEnv *env) {
-  if (!env)
-    return nullptr;
-
-  jclass activity_thread = env->FindClass("android/app/ActivityThread");
-  if (clearJavaException(env) || !activity_thread)
-    return nullptr;
-
-  jmethodID current_activity_thread =
-      env->GetStaticMethodID(activity_thread, "currentActivityThread",
-                             "()Landroid/app/ActivityThread;");
-  if (clearJavaException(env) || !current_activity_thread) {
-    env->DeleteLocalRef(activity_thread);
-    return nullptr;
-  }
-
-  jobject at =
-      env->CallStaticObjectMethod(activity_thread, current_activity_thread);
-  if (clearJavaException(env) || !at) {
-    env->DeleteLocalRef(activity_thread);
-    return nullptr;
-  }
-
-  jmethodID get_application = env->GetMethodID(
-      activity_thread, "getApplication", "()Landroid/app/Application;");
-  if (clearJavaException(env) || !get_application) {
-    env->DeleteLocalRef(at);
-    env->DeleteLocalRef(activity_thread);
-    return nullptr;
-  }
-
-  jobject context = env->CallObjectMethod(at, get_application);
-  if (clearJavaException(env)) {
-    context = nullptr;
-  }
-
-  env->DeleteLocalRef(at);
-  env->DeleteLocalRef(activity_thread);
-  return context;
-}
-
-std::string getAbsolutePath(JNIEnv *env, jobject file) {
-  if (!env || !file)
-    return {};
-
-  jclass file_class = env->GetObjectClass(file);
-  if (clearJavaException(env) || !file_class)
-    return {};
-
-  jmethodID get_abs_path =
-      env->GetMethodID(file_class, "getAbsolutePath", "()Ljava/lang/String;");
-  if (clearJavaException(env) || !get_abs_path) {
-    env->DeleteLocalRef(file_class);
-    return {};
-  }
-
-  auto jstr = (jstring)env->CallObjectMethod(file, get_abs_path);
-  if (clearJavaException(env) || !jstr) {
-    env->DeleteLocalRef(file_class);
-    return {};
-  }
-
-  std::string result = getJStringUtf(env, jstr);
-  env->DeleteLocalRef(jstr);
-  env->DeleteLocalRef(file_class);
-  return result;
-}
-
-std::string getPackageName(JNIEnv *env, jobject context) {
-  if (!env || !context)
-    return {};
-
-  jclass context_class = env->GetObjectClass(context);
-  if (clearJavaException(env) || !context_class)
-    return {};
-
-  jmethodID get_pkg_name =
-      env->GetMethodID(context_class, "getPackageName", "()Ljava/lang/String;");
-  if (clearJavaException(env) || !get_pkg_name) {
-    env->DeleteLocalRef(context_class);
-    return {};
-  }
-
-  auto jstr = (jstring)env->CallObjectMethod(context, get_pkg_name);
-  if (clearJavaException(env) || !jstr) {
-    env->DeleteLocalRef(context_class);
-    return {};
-  }
-
-  std::string result = getJStringUtf(env, jstr);
-  env->DeleteLocalRef(jstr);
-  env->DeleteLocalRef(context_class);
-  return result;
-}
-
-std::string getInternalStoragePath(JNIEnv *env) {
-  if (!env)
-    return {};
-
-  jclass env_class = env->FindClass("android/os/Environment");
-  if (clearJavaException(env) || !env_class)
-    return {};
-
-  jmethodID get_storage_dir = env->GetStaticMethodID(
-      env_class, "getExternalStorageDirectory", "()Ljava/io/File;");
-  if (clearJavaException(env) || !get_storage_dir) {
-    env->DeleteLocalRef(env_class);
-    return {};
-  }
-
-  jobject storage_dir = env->CallStaticObjectMethod(env_class, get_storage_dir);
-  if (clearJavaException(env) || !storage_dir) {
-    env->DeleteLocalRef(env_class);
-    return {};
-  }
-
-  std::string result = getAbsolutePath(env, storage_dir);
-  env->DeleteLocalRef(storage_dir);
-  env->DeleteLocalRef(env_class);
-  return result;
-}
-
-std::string GetModsFilesPath(JNIEnv *env) {
-  jobject app_context = getGlobalContext(env);
-  if (!app_context) {
-    return "";
-  }
-  auto package_name = getPackageName(env, app_context);
-  env->DeleteLocalRef(app_context);
-  if (package_name.empty())
-    return "";
-
-  std::transform(
-      package_name.begin(), package_name.end(), package_name.begin(),
-      [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-  std::string storage_path = getInternalStoragePath(env);
-  if (storage_path.empty())
-    return "";
-
-  return (fs::path(storage_path) / "Android" / "data" / package_name / "mods")
-      .string();
-}
-
-SKY_AUTO_STATIC_HOOK(
-    Hook1, memory::HookPriority::Normal,
-    std::initializer_list<const char *>(
-        {"? ? ? D1 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? "
-         "91 ? ? ? D5 ? ? ? F9 ? ? ? F8 ? ? ? 39 ? ? ? 34 ? ? ? 12"}),
-    int, void *_this, JavaVM *vm) {
-
-  javaVm = vm;
-  if (vm)
-    vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_4);
-  return origin(_this, vm);
-}
-
-#endif
+namespace fs = std::filesystem;
 
 class OreUIConfig {
 public:
@@ -258,31 +33,10 @@ public:
 };
 
 // clang-format off
-#if __arm__
-#define OREUI_PATTERN 
-   {""}
-
-#elif __aarch64__
-#define OREUI_PATTERN                                                                     \
-     std::initializer_list<const char *>({                                                \
-      "? ? ? D1 ? ? ? A9 ? ? ? F9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? 91 ? ? ? D5 F5 03 03 2A F6 03 02 2A ? ? ? F9 F4 03 01 AA", \
-      "? ? ? D1 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? 91 ? ? ? D5 FA 03 03 2A F7 03 02 2A ? ? ? F9 F4 03 01 AA", \
-      "? ? ? D1 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? 91 ? ? ? D5 F7 03 05 AA FB 03 03 2A", \
-  })                                                                                                                    \
-
-#elif _WIN32
-
-#include <string>
-#include <vector>
-#include <windows.h>
-
 #define OREUI_PATTERN                                                                                                    \
      std::initializer_list<const char *>({                                                                               \
-    "55 41 57 41 56 41 55 41 54 56 57 53 48 81 EC E8 01 00 00 48 8D AC 24 ? ? ? ? 48 C7 85 ? ? ? ? ? ? ? ? 44 88 8D 5E", \
-  })                                                                                                 \
-
- #endif
-
+    "55 41 57 41 56 41 55 41 54 56 57 53 48 81 EC ? ? ? ? 48 8D AC 24 ? ? ? ? 48 C7 85 ? ? ? ? ? ? ? ? 44 88 8D ? ? ? ? 44 88 85 ? ? ? ? 48 89 D7", \
+  })
 // clang-format on
 
 namespace {
@@ -291,8 +45,6 @@ using Json = nlohmann::json;
 
 constexpr char kConfigFileName[] = "config.json";
 constexpr char kModDirName[] = "ForceCloseOreUI";
-
-#if defined(_WIN32)
 
 std::string getMinecraftModsPath() {
   const char *appDataPath = std::getenv("APPDATA");
@@ -309,26 +61,13 @@ std::string getUWPModsDir() {
   std::string uwpMods = appDataPath + "\\ForceCloseOreUI\\";
   return uwpMods;
 }
-#endif
 
 void logConfigInfo(const std::string &message) {
-#if defined(_WIN32)
   std::printf("[ForceCloseOreUI] %s\n", message.c_str());
-#elif __arm__ || __aarch64__
-  LOGI("%s", message.c_str());
-#else
-  std::printf("[ForceCloseOreUI] %s\n", message.c_str());
-#endif
 }
 
 void logConfigError(const std::string &message) {
-#if defined(_WIN32)
   std::printf("[ForceCloseOreUI] %s\n", message.c_str());
-#elif __arm__ || __aarch64__
-  LOGE("%s", message.c_str());
-#else
-  std::printf("[ForceCloseOreUI] %s\n", message.c_str());
-#endif
 }
 
 std::string normalizedPathText(const fs::path &path) {
@@ -374,21 +113,8 @@ bool isDirectoryWritable(const fs::path &dir) {
 
 std::vector<fs::path> getConfigDirCandidates() {
   std::vector<fs::path> paths;
-#if defined(_WIN32)
   appendUniquePath(paths, getUWPModsDir());
   appendUniquePath(paths, fs::path("mods") / kModDirName);
-#else
-#if __arm__ || __aarch64__
-  JNIEnv *current_env = getCurrentJNIEnv();
-  if (current_env) {
-    std::string mods_path = GetModsFilesPath(current_env);
-    if (!mods_path.empty())
-      appendUniquePath(paths, fs::path(mods_path) / kModDirName);
-  }
-#endif
-  appendUniquePath(paths, fs::path("/sdcard/games") / kModDirName);
-  appendUniquePath(paths, fs::path("/storage/emulated/0/games") / kModDirName);
-#endif
   return paths;
 }
 

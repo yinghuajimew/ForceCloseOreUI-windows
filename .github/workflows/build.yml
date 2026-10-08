@@ -23,25 +23,3 @@ jobs:
         with:
           name: windows
           path: build/windows/x64/release/*.dll
-
-  build-android:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Setup xmake
-        uses: xmake-io/github-action-setup-xmake@v1
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v4
-
-      - name: Build for Android (SO)
-        run: |
-          xmake f -p android -a arm64-v8a -m release -v -y
-          xmake
-
-      - name: Upload SO
-        uses: actions/upload-artifact@v6
-        with:
-          name: android
-          path: build/android/arm64-v8a/release/*.so
