@@ -1,25 +1,33 @@
-name: Build
+name: Build ForceCloseOreUI
 
 on:
   push:
-  pull_request:
+    paths:
+      - 'src/**'
+      - 'xmake.lua'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
 
 jobs:
-  build-windows:
+  build:
     runs-on: windows-latest
+
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Setup xmake
         uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
 
-      - name: Build for Windows (DLL)
+      - name: Configure and Build
         run: |
           xmake f -p windows -m release -v -y
           xmake
 
-      - name: Upload DLL
-        uses: actions/upload-artifact@v6
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: windows
-          path: build/windows/x64/release/*.dll
+          name: ForceCloseOreUI-windows
+          path: build/windows/x64/release/ForceCloseOreUI.dll
