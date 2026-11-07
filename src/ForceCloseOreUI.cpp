@@ -5,7 +5,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-#include <detours.h>
+#include <detours/detours.h>   // liteldev 的 detours 包把头文件装在 include/detours/ 下
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
