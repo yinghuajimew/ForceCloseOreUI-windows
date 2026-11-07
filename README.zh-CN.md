@@ -12,10 +12,6 @@
 
 <br/>
 
-> [!WARNING]
-> 非官方 Mod，与 Mojang、微软无关。修改客户端违反 Minecraft 使用条款，账号可能被封。
-> 请自行承担风险。
-
 ## 这是什么
 
 一个 x64 Windows DLL，通过 Microsoft Detours 钩住 Minecraft 基岩版初始化 OreUI 配置的函数，

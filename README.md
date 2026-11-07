@@ -12,10 +12,6 @@
 
 <br/>
 
-> [!WARNING]
-> Unofficial mod. Not affiliated with Mojang or Microsoft. Modding Minecraft is against the
-> Minecraft Terms of Service and can get your account banned. Use at your own risk.
-
 ## What this is
 
 An x64 Windows DLL that hooks Minecraft Bedrock's OreUI config initializer (via Microsoft Detours)
